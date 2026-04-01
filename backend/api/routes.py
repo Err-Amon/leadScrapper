@@ -13,6 +13,7 @@ from database.models import (
 from exporter.csv_exporter import generate_csv
 from scraper.maps_scraper import run_maps_scrape
 from scraper.dorks_scraper import run_dorks_scrape
+from processing.enricher import run_enrichment
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -46,6 +47,7 @@ class TaskResponse(BaseModel):
     progress: int
     total: int
     error: Optional[str] = None
+    enrichment_status: Optional[str] = "none"
     created_at: str
     updated_at: str
 
@@ -86,6 +88,58 @@ def start_dorks_task(body: StartDorksTaskRequest):
     return {"task_id": task_id, "status": "pending"}
 
 
+@router.post("/tasks/{task_id}/enrich", status_code=202)
+def start_enrichment(task_id: str):
+
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found.")
+
+    if task["status"] not in ("completed", "running"):
+        raise HTTPException(
+            status_code=400,
+            detail="Enrichment requires the task to be completed or running.",
+        )
+
+    if task.get("enrichment_status") == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="Enrichment is already running for this task.",
+        )
+
+    lead_count = get_task_lead_count(task_id)
+    if lead_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No leads to enrich — run the scraper first.",
+        )
+
+    task_manager._executor.submit(
+        _run_enrichment_safe,
+        task_id=task_id,
+    )
+
+    logger.info(f"Enrichment submitted for task {task_id}")
+    return {
+        "task_id": task_id,
+        "enrichment_status": "running",
+        "message": "Enrichment started. Poll GET /tasks/{task_id} for status.",
+    }
+
+
+def _run_enrichment_safe(task_id: str) -> None:
+
+    from utils.logger import get_task_logger
+    from database.models import update_task_enrichment_status
+
+    task_logger = get_task_logger(task_id)
+    try:
+        run_enrichment(task_id=task_id, task_logger=task_logger)
+    except Exception as exc:
+        logger.error(f"Enrichment thread for task {task_id} crashed: {exc}")
+        update_task_enrichment_status(task_id, "failed")
+
+
 @router.get("/tasks", response_model=list[TaskResponse])
 def list_tasks():
     """Return the 50 most recently created tasks."""
@@ -94,6 +148,7 @@ def list_tasks():
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
 def get_task_status(task_id: str):
+    """Return status, progress, and enrichment_status for a single task."""
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -119,15 +174,10 @@ def get_results(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     search: str = Query(default="", description="Free-text search across all fields"),
-    source: str = Query(default="", description="Filter by source: 'maps' or 'dorks'"),
-    has_email: bool = Query(
-        default=False, description="Only return leads with an email"
-    ),
-    has_phone: bool = Query(
-        default=False, description="Only return leads with a phone"
-    ),
+    source: str = Query(default="", description="'maps' or 'dorks'"),
+    has_email: bool = Query(default=False, description="Only leads with an email"),
+    has_phone: bool = Query(default=False, description="Only leads with a phone"),
 ):
-
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -142,7 +192,7 @@ def get_results(
         has_phone=has_phone,
     )
 
-    total_pages = max(1, -(-total // page_size))  # Ceiling division
+    total_pages = max(1, -(-total // page_size))
 
     return {
         "task_id": task_id,
@@ -173,8 +223,7 @@ def export_csv(
             detail="Task must be running or completed before exporting.",
         )
 
-    lead_count = get_task_lead_count(task_id)
-    if lead_count == 0:
+    if get_task_lead_count(task_id) == 0:
         raise HTTPException(
             status_code=400,
             detail="No leads collected yet for this task.",
@@ -202,4 +251,4 @@ def export_csv(
 
 @router.get("/health")
 def health_check():
-    return {"status": "ok", "service": "lead-gen-tool", "phase": 3}
+    return {"status": "ok", "service": "lead-gen-tool", "phase": 5}
