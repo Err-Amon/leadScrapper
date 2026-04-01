@@ -4,7 +4,12 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from core.task_manager import TaskManager
-from database.models import get_task, get_all_tasks, get_leads_by_task
+from database.models import (
+    get_task,
+    get_all_tasks,
+    get_leads_by_task,
+    get_task_lead_count,
+)
 from exporter.csv_exporter import generate_csv
 from scraper.maps_scraper import run_maps_scrape
 from scraper.dorks_scraper import run_dorks_scrape
@@ -17,10 +22,10 @@ task_manager = TaskManager()
 
 class StartMapsTaskRequest(BaseModel):
     keyword: str = Field(
-        ..., min_length=1, description="Search keyword e.g. 'plumbers'"
+        ..., min_length=1, description="Search keyword, e.g. 'plumbers'"
     )
     location: str = Field(
-        ..., min_length=1, description="Location e.g. 'Lahore, Pakistan'"
+        ..., min_length=1, description="Location, e.g. 'Lahore, Pakistan'"
     )
     max_results: int = Field(default=20, ge=1, le=100)
 
@@ -31,7 +36,7 @@ class StartDorksTaskRequest(BaseModel):
 
 
 class TaskResponse(BaseModel):
-    task_id: str
+    id: str
     status: str
     source: str
     keyword: Optional[str] = None
@@ -56,7 +61,7 @@ class LeadsResponse(BaseModel):
 
 @router.post("/tasks/maps", status_code=202)
 def start_maps_task(body: StartMapsTaskRequest):
-    """Start a Maps scraping task. Returns task_id immediately."""
+
     task_id = task_manager.submit_task(
         source="maps",
         worker_fn=run_maps_scrape,
@@ -70,7 +75,7 @@ def start_maps_task(body: StartMapsTaskRequest):
 
 @router.post("/tasks/dorks", status_code=202)
 def start_dorks_task(body: StartDorksTaskRequest):
-    """Start a Dorks scraping task. Returns task_id immediately."""
+
     task_id = task_manager.submit_task(
         source="dorks",
         worker_fn=run_dorks_scrape,
@@ -83,13 +88,12 @@ def start_dorks_task(body: StartDorksTaskRequest):
 
 @router.get("/tasks", response_model=list[TaskResponse])
 def list_tasks():
-    """Return the 50 most recent tasks."""
+    """Return the 50 most recently created tasks."""
     return get_all_tasks(limit=50)
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
 def get_task_status(task_id: str):
-    """Return current status and progress of a single task."""
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -97,8 +101,11 @@ def get_task_status(task_id: str):
 
 
 @router.get("/tasks/{task_id}/logs")
-def get_task_logs(task_id: str, tail: int = Query(default=50, ge=1, le=200)):
-    """Return the last N lines from the task's log file."""
+def get_task_logs(
+    task_id: str,
+    tail: int = Query(default=50, ge=1, le=200),
+):
+    """Return the last N log lines from the task's log file."""
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -111,13 +118,30 @@ def get_results(
     task_id: str,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    search: str = Query(default="", description="Free-text search across all fields"),
+    source: str = Query(default="", description="Filter by source: 'maps' or 'dorks'"),
+    has_email: bool = Query(
+        default=False, description="Only return leads with an email"
+    ),
+    has_phone: bool = Query(
+        default=False, description="Only return leads with a phone"
+    ),
 ):
-    """Return paginated leads for a task."""
+
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
 
-    leads, total = get_leads_by_task(task_id, page=page, page_size=page_size)
+    leads, total = get_leads_by_task(
+        task_id=task_id,
+        page=page,
+        page_size=page_size,
+        search=search,
+        source_filter=source,
+        has_email=has_email,
+        has_phone=has_phone,
+    )
+
     total_pages = max(1, -(-total // page_size))  # Ceiling division
 
     return {
@@ -131,30 +155,51 @@ def get_results(
 
 
 @router.get("/tasks/{task_id}/export")
-def export_csv(task_id: str):
-    """Generate and download a CSV file of all leads for a task."""
+def export_csv(
+    task_id: str,
+    search: str = Query(default=""),
+    source: str = Query(default=""),
+    has_email: bool = Query(default=False),
+    has_phone: bool = Query(default=False),
+):
+
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
+
     if task["status"] not in ("completed", "running"):
         raise HTTPException(
             status_code=400,
             detail="Task must be running or completed before exporting.",
         )
 
+    lead_count = get_task_lead_count(task_id)
+    if lead_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No leads collected yet for this task.",
+        )
+
     try:
-        csv_path = generate_csv(task_id)
+        csv_path = generate_csv(
+            task_id=task_id,
+            search=search,
+            source_filter=source,
+            has_email=has_email,
+            has_phone=has_phone,
+        )
     except Exception as exc:
         logger.error(f"CSV export failed for task {task_id}: {exc}")
-        raise HTTPException(status_code=500, detail="Export generation failed.")
+        raise HTTPException(status_code=500, detail=f"Export failed: {exc}")
 
     return FileResponse(
         path=str(csv_path),
         media_type="text/csv",
         filename=csv_path.name,
+        headers={"Content-Disposition": f'attachment; filename="{csv_path.name}"'},
     )
 
 
 @router.get("/health")
 def health_check():
-    return {"status": "ok", "service": "lead-gen-tool"}
+    return {"status": "ok", "service": "lead-gen-tool", "phase": 3}

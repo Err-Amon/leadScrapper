@@ -17,7 +17,6 @@ def insert_lead(
     keyword: str = "",
 ) -> Optional[int]:
 
-    # Deduplication check within the same task
     if email or phone:
         with get_connection() as conn:
             existing = conn.execute(
@@ -25,8 +24,8 @@ def insert_lead(
                 SELECT id FROM leads
                 WHERE task_id = ?
                   AND (
-                        (email != '' AND email = ?)
-                     OR (phone != '' AND phone = ?)
+                        (email  != '' AND email  IS NOT NULL AND email  = ?)
+                     OR (phone  != '' AND phone  IS NOT NULL AND phone  = ?)
                       )
                 LIMIT 1
                 """,
@@ -38,7 +37,8 @@ def insert_lead(
     with get_connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO leads (task_id, name, phone, email, website, address, rating, source, keyword)
+            INSERT INTO leads
+                (task_id, name, phone, email, website, address, rating, source, keyword)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (task_id, name, phone, email, website, address, rating, source, keyword),
@@ -51,44 +51,109 @@ def get_leads_by_task(
     task_id: str,
     page: int = 1,
     page_size: int = 20,
+    search: str = "",
+    source_filter: str = "",
+    has_email: bool = False,
+    has_phone: bool = False,
 ) -> tuple[list[dict], int]:
 
-    offset = (page - 1) * page_size
+    conditions = ["task_id = ?"]
+    params: list = [task_id]
+
+    if search:
+        conditions.append(
+            "(name LIKE ? OR email LIKE ? OR phone LIKE ? OR address LIKE ? OR website LIKE ?)"
+        )
+        term = f"%{search}%"
+        params.extend([term, term, term, term, term])
+
+    if source_filter in ("maps", "dorks"):
+        conditions.append("source = ?")
+        params.append(source_filter)
+
+    if has_email:
+        conditions.append("email IS NOT NULL AND email != ''")
+
+    if has_phone:
+        conditions.append("phone IS NOT NULL AND phone != ''")
+
+    where_clause = " AND ".join(conditions)
+
     with get_connection() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) FROM leads WHERE task_id = ?",
-            (task_id,),
+            f"SELECT COUNT(*) FROM leads WHERE {where_clause}",
+            params,
         ).fetchone()[0]
 
+        offset = (page - 1) * page_size
         rows = conn.execute(
-            """
-            SELECT id, name, phone, email, website, address, rating, source, keyword, created_at
+            f"""
+            SELECT id, name, phone, email, website, address,
+                   rating, source, keyword, created_at
             FROM leads
-            WHERE task_id = ?
+            WHERE {where_clause}
             ORDER BY id ASC
             LIMIT ? OFFSET ?
             """,
-            (task_id, page_size, offset),
+            params + [page_size, offset],
         ).fetchall()
 
-    leads = [dict(row) for row in rows]
-    return leads, total
+    return [dict(row) for row in rows], total
 
 
-def iter_leads_for_export(task_id: str, chunk_size: int = 100):
+def get_task_lead_count(task_id: str) -> int:
+    with get_connection() as conn:
+        result = conn.execute(
+            "SELECT COUNT(*) FROM leads WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+    return result[0] if result else 0
 
+
+def iter_leads_for_export(
+    task_id: str,
+    chunk_size: int = 100,
+    search: str = "",
+    source_filter: str = "",
+    has_email: bool = False,
+    has_phone: bool = False,
+):
+
+    conditions = ["task_id = ?"]
+    base_params: list = [task_id]
+
+    if search:
+        conditions.append(
+            "(name LIKE ? OR email LIKE ? OR phone LIKE ? OR address LIKE ? OR website LIKE ?)"
+        )
+        term = f"%{search}%"
+        base_params.extend([term, term, term, term, term])
+
+    if source_filter in ("maps", "dorks"):
+        conditions.append("source = ?")
+        base_params.append(source_filter)
+
+    if has_email:
+        conditions.append("email IS NOT NULL AND email != ''")
+
+    if has_phone:
+        conditions.append("phone IS NOT NULL AND phone != ''")
+
+    where_clause = " AND ".join(conditions)
     offset = 0
+
     while True:
         with get_connection() as conn:
             rows = conn.execute(
-                """
-                SELECT name, phone, email, website, address, rating, source, keyword, created_at
+                f"""
+                SELECT name, phone, email, website, address,
+                       rating, source, keyword, created_at
                 FROM leads
-                WHERE task_id = ?
+                WHERE {where_clause}
                 ORDER BY id ASC
                 LIMIT ? OFFSET ?
                 """,
-                (task_id, chunk_size, offset),
+                base_params + [chunk_size, offset],
             ).fetchall()
 
         if not rows:
@@ -109,6 +174,24 @@ def update_lead_email(lead_id: int, email: str) -> None:
         conn.commit()
 
 
+def get_leads_missing_email(task_id: str, limit: int = 50) -> list[dict]:
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, name, website, address, phone
+            FROM leads
+            WHERE task_id = ?
+              AND (email IS NULL OR email = '')
+              AND website IS NOT NULL AND website != ''
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (task_id, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def create_task(
     task_id: str,
     source: str,
@@ -120,7 +203,8 @@ def create_task(
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO tasks (id, status, source, keyword, location, dork_query, max_results)
+            INSERT INTO tasks
+                (id, status, source, keyword, location, dork_query, max_results)
             VALUES (?, 'pending', ?, ?, ?, ?, ?)
             """,
             (task_id, source, keyword, location, dork_query, max_results),
@@ -139,7 +223,10 @@ def update_task_status(
         conn.execute(
             """
             UPDATE tasks
-            SET status = ?, progress = ?, total = ?, error = ?,
+            SET status     = ?,
+                progress   = ?,
+                total      = ?,
+                error      = ?,
                 updated_at = datetime('now')
             WHERE id = ?
             """,
@@ -154,11 +241,7 @@ def get_task(task_id: str) -> Optional[dict]:
             "SELECT * FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
-    if row:
-        task = dict(row)
-        task["task_id"] = task.pop("id")
-        return task
-    return None
+    return dict(row) if row else None
 
 
 def get_all_tasks(limit: int = 50) -> list[dict]:
@@ -167,9 +250,4 @@ def get_all_tasks(limit: int = 50) -> list[dict]:
             "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    tasks = []
-    for row in rows:
-        task = dict(row)
-        task["task_id"] = task.pop("id")
-        tasks.append(task)
-    return tasks
+    return [dict(row) for row in rows]
