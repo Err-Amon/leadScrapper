@@ -1,4 +1,4 @@
-# LeadGen — Lead Intelligence Platform
+# LeadScrapper — Lead Intelligence Platform
 
 Web-based lead generation tool built with Python (FastAPI) + React + SQLite.
 
