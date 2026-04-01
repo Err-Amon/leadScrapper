@@ -154,7 +154,11 @@ def get_task(task_id: str) -> Optional[dict]:
             "SELECT * FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
-    return dict(row) if row else None
+    if row:
+        task = dict(row)
+        task["task_id"] = task.pop("id")
+        return task
+    return None
 
 
 def get_all_tasks(limit: int = 50) -> list[dict]:
@@ -163,4 +167,9 @@ def get_all_tasks(limit: int = 50) -> list[dict]:
             "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    return [dict(row) for row in rows]
+    tasks = []
+    for row in rows:
+        task = dict(row)
+        task["task_id"] = task.pop("id")
+        tasks.append(task)
+    return tasks
