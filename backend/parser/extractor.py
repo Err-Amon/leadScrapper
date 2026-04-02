@@ -7,6 +7,24 @@ from bs4 import BeautifulSoup
 # Email: standard RFC-5321 subset — broad enough to catch real addresses
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 
+# Obfuscated email patterns: info[at]domain.com, info (at) domain . com, etc.
+OBFUSCATED_EMAIL_RE = re.compile(
+    r"([a-zA-Z0-9._%+\-]+)"
+    r"\s*(?:\[at\]|\(at\)|\{at\}|\bat\b|@)"
+    r"\s*([a-zA-Z0-9.\-]+)"
+    r"\s*(?:\[dot\]|\(dot\)|\{dot\}|\bdot\b|\.)"
+    r"\s*([a-zA-Z]{2,})"
+)
+
+# Obfuscated email patterns: info[at]domain.com, info (at) domain . com, etc.
+OBFUSCATED_EMAIL_RE = re.compile(
+    r"([a-zA-Z0-9._%+\-]+)"
+    r"\s*(?:\[at\]|\(at\)|\{at\}|\bat\b|@)"
+    r"\s*([a-zA-Z0-9.\-]+)"
+    r"\s*(?:\[dot\]|\(dot\)|\{dot\}|\bdot\b|\.)"
+    r"\s*([a-zA-Z]{2,})"
+)
+
 # Phone: international and local formats
 # Matches: +92-300-1234567, (021) 345-6789, 0300 123 4567, +1 800 555-0100
 PHONE_RE = re.compile(
@@ -49,6 +67,27 @@ ASSET_EXTENSIONS = frozenset(
     }
 )
 
+# Social media platforms to extract
+SOCIAL_PATTERNS = [
+    (
+        re.compile(r"(?:https?://)?(?:www\.)?linkedin\.com/company/[\w\-]+", re.I),
+        "linkedin",
+    ),
+    (
+        re.compile(r"(?:https?://)?(?:www\.)?linkedin\.com/in/[\w\-]+", re.I),
+        "linkedin_profile",
+    ),
+    (re.compile(r"(?:https?://)?(?:www\.)?facebook\.com/[\w\-]+", re.I), "facebook"),
+    (re.compile(r"(?:https?://)?(?:www\.)?twitter\.com/[\w\-]+", re.I), "twitter"),
+    (re.compile(r"(?:https?://)?(?:www\.)?x\.com/[\w\-]+", re.I), "x_twitter"),
+    (re.compile(r"(?:https?://)?(?:www\.)?instagram\.com/[\w\-]+", re.I), "instagram"),
+    (re.compile(r"(?:https?://)?(?:www\.)?youtube\.com/[\w\-]+", re.I), "youtube"),
+    (re.compile(r"(?:https?://)?(?:www\.)?tiktok\.com/[\w\-]+", re.I), "tiktok"),
+    (re.compile(r"(?:https?://)?(?:www\.)?pinterest\.com/[\w\-]+", re.I), "pinterest"),
+    (re.compile(r"(?:https?://)?(?:www\.)?github\.com/[\w\-]+", re.I), "github"),
+    (re.compile(r"(?:https?://)?(?:www\.)?threads\.net/[\w\-]+", re.I), "threads"),
+]
+
 
 def extract_emails(text: str) -> list[str]:
     if not text:
@@ -74,6 +113,18 @@ def extract_emails(text: str) -> list[str]:
 
         seen[email] = None  # OrderedDict-style dedup
 
+    # Also try to find obfuscated emails
+    for match in OBFUSCATED_EMAIL_RE.finditer(text):
+        user = match.group(1).strip().lower()
+        host = match.group(2).strip().lower()
+        tld = match.group(3).strip().lower()
+        email = f"{user}@{host}.{tld}"
+
+        if email not in seen:
+            domain = host + "." + tld
+            if domain not in JUNK_EMAIL_DOMAINS and len(email) <= 80:
+                seen[email] = None
+
     return list(seen.keys())
 
 
@@ -95,6 +146,14 @@ def extract_phones(text: str) -> list[str]:
         key = digits
         if key not in seen:
             seen[key] = phone.strip()
+
+    # Also try to find standalone phone-like number sequences
+    standalone_phones = re.findall(r"\+?[\d][\d\s\-\(\)]{6,}", text)
+    for sp in standalone_phones:
+        cleaned = sp.strip()
+        digits = re.sub(r"\D", "", cleaned)
+        if 7 <= len(digits) <= 15 and digits not in seen:
+            seen[digits] = cleaned
 
     return list(seen.values())
 
@@ -119,6 +178,7 @@ def parse_maps_listing(raw: dict) -> dict:
         "rating": raw.get("rating"),
         "source": raw.get("source", "maps"),
         "keyword": raw.get("keyword", ""),
+        "social_links": raw.get("social_links", []),
     }
 
     # If phone is missing, try to extract it from the address string
@@ -146,27 +206,29 @@ def parse_maps_listing(raw: dict) -> dict:
 
 def parse_page_contacts(html: str, source_url: str = "") -> dict:
     if not html:
-        return {"emails": [], "phones": [], "name": "", "address": ""}
+        return {
+            "emails": [],
+            "phones": [],
+            "name": "",
+            "address": "",
+            "social_links": [],
+        }
 
     soup = BeautifulSoup(html, "lxml")
 
     # Extract from JSON-LD structured data FIRST (before removing scripts)
     json_emails, json_phones, json_addr = _extract_json_ld_contacts(soup)
 
-    # Remove script and style content — not useful for contact extraction
-    for tag in soup(["script", "style", "noscript", "meta", "link"]):
-        tag.decompose()
-
-    full_text = soup.get_text(" ", strip=True)
-
-    # Also scan mailto: links — more reliable than regex on rendered text
+    # Extract emails from ALL href attributes before removing anything
     emails = []
+
+    # 1. mailto: links (most reliable)
     for a_tag in soup.select("a[href^='mailto:']"):
         href = a_tag["href"].replace("mailto:", "").split("?")[0].strip().lower()
         if href and "@" in href:
             emails.append(href)
 
-    # Also look for email patterns in hrefs like "mailto:" encoded forms
+    # 2. Any href containing @ or mailto (obfuscated, encoded, etc.)
     for a_tag in soup.select("a"):
         href = a_tag.get("href", "")
         if "mailto" in href.lower() or "@" in href:
@@ -176,23 +238,59 @@ def parse_page_contacts(html: str, source_url: str = "") -> dict:
                 if email not in emails:
                     emails.append(email)
 
-    emails.extend(json_emails)
+    # 3. Check meta tags for emails (description, keywords, author, etc.)
+    for meta in soup.find_all("meta"):
+        for attr_name in ["content", "value"]:
+            content = meta.get(attr_name, "")
+            if content and "@" in content:
+                for match in EMAIL_RE.findall(content):
+                    email = match.strip().lower().rstrip(".,;)")
+                    if email and email not in emails:
+                        emails.append(email)
+
+    # 4. Check all attribute values for email patterns (data-email, data-contact, etc.)
+    for tag in soup.find_all(True):
+        for attr_name, attr_value in tag.attrs.items():
+            if isinstance(attr_value, str) and "@" in attr_value:
+                for match in EMAIL_RE.findall(attr_value):
+                    email = match.strip().lower().rstrip(".,;)")
+                    if email and email not in emails:
+                        emails.append(email)
+            elif isinstance(attr_value, list):
+                for val in attr_value:
+                    if "@" in val:
+                        for match in EMAIL_RE.findall(val):
+                            email = match.strip().lower().rstrip(".,;)")
+                            if email and email not in emails:
+                                emails.append(email)
+
+    # Now remove script/style/noscript — they're not useful for visible text
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+
+    full_text = soup.get_text(" ", strip=True)
+
+    # 5. Extract emails from visible page text
     emails.extend(extract_emails(full_text))
+    emails.extend(json_emails)
     emails = list(dict.fromkeys(emails))  # dedup, preserve order
 
+    # Phones
     phones = []
+
+    # 1. tel: links (most reliable)
     for a_tag in soup.select("a[href^='tel:']"):
         href = a_tag["href"].replace("tel:", "").strip()
         digits = re.sub(r"\D", "", href)
         if 7 <= len(digits) <= 15:
             phones.append(href)
 
-    # Also check for phone patterns in hrefs like "callto:" or "wtsp:"
+    # 2. Check all href attributes for phone patterns (callto:, wtsp:, whatsapp:, phone:, sms:)
     for a_tag in soup.select("a"):
         href = a_tag.get("href", "")
         if any(
             p in href.lower()
-            for p in ["tel:", "callto:", "wtsp:", "whatsapp:", "phone:"]
+            for p in ["tel:", "callto:", "wtsp:", "whatsapp:", "phone:", "sms:"]
         ):
             phone_match = re.search(r"[\d\+\-\(\)\s]{7,20}", href)
             if phone_match:
@@ -201,6 +299,35 @@ def parse_page_contacts(html: str, source_url: str = "") -> dict:
                 if 7 <= len(digits) <= 15 and phone not in phones:
                     phones.append(phone)
 
+    # 3. Check meta tags for phone numbers
+    for meta in soup.find_all("meta"):
+        for attr_name in ["content", "value"]:
+            content = meta.get(attr_name, "")
+            if content:
+                phone_matches = extract_phones(content)
+                for p in phone_matches:
+                    if p not in phones:
+                        phones.append(p)
+
+    # 4. Check all attribute values for phone patterns (data-phone, data-tel, data-contact, etc.)
+    for tag in soup.find_all(True):
+        for attr_name, attr_value in tag.attrs.items():
+            if isinstance(attr_value, str):
+                # Check for tel: in href-like attributes
+                if "tel:" in attr_value.lower() or re.search(r"[\d]{7,}", attr_value):
+                    phone_matches = extract_phones(attr_value)
+                    for p in phone_matches:
+                        if p not in phones:
+                            phones.append(p)
+            elif isinstance(attr_value, list):
+                for val in attr_value:
+                    if "tel:" in val.lower() or re.search(r"[\d]{7,}", val):
+                        phone_matches = extract_phones(val)
+                        for p in phone_matches:
+                            if p not in phones:
+                                phones.append(p)
+
+    # 5. Extract phones from visible page text
     phones.extend(json_phones)
     phones.extend(extract_phones(full_text))
     phones = list(dict.fromkeys(phones))
@@ -237,11 +364,15 @@ def parse_page_contacts(html: str, source_url: str = "") -> dict:
             if addr_match:
                 address = addr_match.group(0).strip()
 
+    # Social links
+    social_links = _extract_social_links(soup)
+
     return {
-        "emails": emails[:5],  # Cap at 5 to avoid spam lists
-        "phones": phones[:3],  # Cap at 3 most likely numbers
+        "emails": emails[:5],
+        "phones": phones[:3],
         "name": name[:120],
         "address": address[:150],
+        "social_links": social_links,
     }
 
 
@@ -334,3 +465,98 @@ def _recursive_extract(data, emails: list, phones: list) -> None:
     elif isinstance(data, list):
         for item in data:
             _recursive_extract(item, emails, phones)
+
+
+def _extract_social_links(soup: BeautifulSoup) -> list[str]:
+    """Extract social media profile URLs from parsed HTML."""
+    found: dict[str, str] = {}
+
+    # 1. Check all href attributes (absolute and relative URLs)
+    for a_tag in soup.select("a[href]"):
+        href = a_tag["href"].strip()
+        # Normalize relative URLs to absolute by prepending a dummy domain
+        test_href = href if href.startswith("http") else "https://example.com" + href
+        for pattern, platform in SOCIAL_PATTERNS:
+            if platform not in found:
+                match = pattern.search(test_href)
+                if match:
+                    cleaned = match.group(0)
+                    if not cleaned.startswith("http"):
+                        cleaned = "https://" + cleaned
+                    found[platform] = cleaned
+
+    # 2. Check aria-label attributes on links/icons
+    for tag in soup.find_all(True):
+        aria = tag.get("aria-label", "")
+        if aria:
+            aria_lower = aria.lower()
+            for platform_key in [
+                "linkedin",
+                "facebook",
+                "twitter",
+                "instagram",
+                "youtube",
+                "tiktok",
+                "pinterest",
+                "github",
+                "threads",
+            ]:
+                if platform_key in aria_lower and platform_key not in found:
+                    # Try to find the URL from parent <a> tag
+                    parent_a = tag.find_parent("a")
+                    if parent_a and parent_a.get("href"):
+                        parent_href = parent_a["href"].strip()
+                        test_href = (
+                            parent_href
+                            if parent_href.startswith("http")
+                            else "https://example.com" + parent_href
+                        )
+                        for pattern, platform in SOCIAL_PATTERNS:
+                            if platform == platform_key or platform.startswith(
+                                platform_key
+                            ):
+                                match = pattern.search(test_href)
+                                if match:
+                                    cleaned = match.group(0)
+                                    if not cleaned.startswith("http"):
+                                        cleaned = "https://" + cleaned
+                                    found[platform] = cleaned
+                                    break
+                        if platform_key in [p for p in found]:
+                            break
+
+    # 3. Check for social links in JSON-LD structured data
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            import json
+
+            data = json.loads(script.string)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict):
+                    for key in ["sameAs", "socialLinks"]:
+                        links = item.get(key, [])
+                        if isinstance(links, list):
+                            for link in links:
+                                if isinstance(link, str):
+                                    for pattern, platform in SOCIAL_PATTERNS:
+                                        if platform not in found:
+                                            match = pattern.search(link)
+                                            if match:
+                                                cleaned = match.group(0)
+                                                if not cleaned.startswith("http"):
+                                                    cleaned = "https://" + cleaned
+                                                found[platform] = cleaned
+                        elif isinstance(links, str):
+                            for pattern, platform in SOCIAL_PATTERNS:
+                                if platform not in found:
+                                    match = pattern.search(links)
+                                    if match:
+                                        cleaned = match.group(0)
+                                        if not cleaned.startswith("http"):
+                                            cleaned = "https://" + cleaned
+                                        found[platform] = cleaned
+        except Exception:
+            pass
+
+    return list(found.values())

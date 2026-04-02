@@ -53,7 +53,6 @@ def run_enrichment(
     task_logger: logging.Logger,
     **kwargs,
 ) -> None:
-
     task_logger.info(f"Enrichment started for task {task_id}")
     update_task_enrichment_status(task_id, "running")
 
@@ -116,7 +115,6 @@ def _enrich_batch_concurrent(
     candidates: list[dict],
     task_logger: logging.Logger,
 ) -> dict[int, dict | None]:
-
     results: dict[int, dict | None] = {}
 
     with ThreadPoolExecutor(
@@ -145,7 +143,6 @@ def _enrich_single_lead(
     lead: dict,
     task_logger: logging.Logger,
 ) -> dict | None:
-
     website = lead.get("website", "").strip()
     if not website:
         return None
@@ -237,7 +234,6 @@ def _fetch_page(url: str) -> str | None:
 
 
 def _extract_social_links(html: str) -> list[str]:
-
     from bs4 import BeautifulSoup
 
     found: dict[str, str] = {}  # platform → url (keeps first found per platform)
@@ -246,12 +242,18 @@ def _extract_social_links(html: str) -> list[str]:
         soup = BeautifulSoup(html, "lxml")
         for a_tag in soup.find_all("a", href=True):
             href = a_tag["href"].strip()
-            if not href.startswith("http"):
-                continue
+            # Normalize relative URLs to absolute for matching
+            test_href = (
+                href if href.startswith("http") else "https://example.com" + href
+            )
             for domain, platform in SOCIAL_DOMAINS.items():
-                if domain in href and platform not in found:
+                if domain in test_href and platform not in found:
                     # Clean the URL — just scheme + domain + path, no query strings
-                    cleaned = _strip_url_query(href)
+                    cleaned = _strip_url_query(
+                        href
+                        if href.startswith("http")
+                        else "https://" + href.lstrip("/")
+                    )
                     if cleaned:
                         found[platform] = cleaned
     except Exception:

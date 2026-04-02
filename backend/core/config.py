@@ -20,12 +20,12 @@ REQUEST_TIMEOUT = 12  # Seconds per HTTP request
 MAX_RETRIES = 3  # Retry attempts on transient failures
 MAX_RESULTS_DEFAULT = 20  # Default result cap
 
-REQUEST_DELAY_MIN = 2.0  # Minimum seconds between requests
-REQUEST_DELAY_MAX = 5.0  # Maximum seconds between requests
-JITTER_MIN = 0.3  # Extra random jitter added to each delay (min)
-JITTER_MAX = 1.2  # Extra random jitter added to each delay (max)
-PAGE_TURN_DELAY_MIN = 3.0  # Extra pause between paginated page fetches
-PAGE_TURN_DELAY_MAX = 7.0  # Simulates reading time between pages
+REQUEST_DELAY_MIN = 1.0  # Minimum seconds between requests
+REQUEST_DELAY_MAX = 2.5  # Maximum seconds between requests
+JITTER_MIN = 0.2  # Extra random jitter added to each delay (min)
+JITTER_MAX = 0.8  # Extra random jitter added to each delay (max)
+PAGE_TURN_DELAY_MIN = 1.5  # Extra pause between paginated page fetches
+PAGE_TURN_DELAY_MAX = 3.5  # Simulates reading time between pages
 
 MAX_CONSECUTIVE_FAILURES = 4  # Abort scrape after this many back-to-back errors
 BACKOFF_BASE_DELAY = 2.0  # Base seconds for exponential backoff

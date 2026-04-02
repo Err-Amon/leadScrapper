@@ -210,7 +210,7 @@ def export_csv(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
 
-    if task["status"] not in ("completed", "running"):
+    if task["status"] not in ("completed", "running", "cancelled"):
         raise HTTPException(
             status_code=400,
             detail="Task must be running or completed before exporting.",

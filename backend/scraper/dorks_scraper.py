@@ -234,15 +234,21 @@ def _scrape_url_for_contacts(
         "name": "",
         "address": "",
         "website": url,
+        "social_links": [],
     }
     consecutive_failures = 0
 
+    task_logger.info(f"Fetching homepage: {url}")
     html = _fetch_safe(url, session, task_logger)
     if html:
         _merge_contacts(contacts, parse_page_contacts(html, source_url=url))
         consecutive_failures = 0
+        task_logger.info(
+            f"After homepage: {len(contacts['emails'])} email(s), {len(contacts['phones'])} phone(s)"
+        )
     else:
         consecutive_failures += 1
+        task_logger.warning(f"Failed to fetch homepage: {url}")
 
     if not contacts["emails"] or not contacts["phones"]:
         for path in CONTACT_PAGE_PATHS:
@@ -252,23 +258,45 @@ def _scrape_url_for_contacts(
                 )
                 break
 
+            if contacts["emails"] and contacts["phones"]:
+                break
+
             sub_url = f"https://{domain}{path}"
             if sub_url == url:
                 continue
 
+            task_logger.debug(f"Trying contact page: {sub_url}")
             sub_html = _fetch_safe(sub_url, session, task_logger)
             if sub_html:
                 _merge_contacts(
                     contacts, parse_page_contacts(sub_html, source_url=sub_url)
                 )
                 consecutive_failures = 0
+                task_logger.info(
+                    f"After {path}: {len(contacts['emails'])} email(s), {len(contacts['phones'])} phone(s)"
+                )
             else:
                 consecutive_failures += 1
+                task_logger.debug(f"Failed to fetch: {sub_url}")
 
-            if contacts["emails"] and contacts["phones"]:
-                break
+            random_delay()
 
-            page_turn_delay()
+    if contacts["emails"]:
+        task_logger.info(f"Found email: {contacts['emails'][0]}")
+    else:
+        task_logger.warning(f"No email found for {domain}")
+
+    if contacts["phones"]:
+        task_logger.info(f"Found phone: {contacts['phones'][0]}")
+    else:
+        task_logger.warning(f"No phone found for {domain}")
+
+    if contacts.get("social_links"):
+        task_logger.info(
+            f"Found social links: {', '.join(contacts['social_links'][:3])}"
+        )
+    else:
+        task_logger.info(f"No social links found for {domain}")
 
     if not any([contacts["emails"], contacts["phones"], contacts["name"]]):
         return None
@@ -281,6 +309,7 @@ def _scrape_url_for_contacts(
         "address": contacts["address"],
         "rating": None,
         "source": "dorks",
+        "social_links": contacts.get("social_links", []),
     }
 
 
@@ -384,3 +413,7 @@ def _merge_contacts(target: dict, source: dict) -> None:
 
     if not target["address"] and source.get("address"):
         target["address"] = source["address"]
+
+    for link in source.get("social_links", []):
+        if link not in target["social_links"]:
+            target["social_links"].append(link)

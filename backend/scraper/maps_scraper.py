@@ -3,7 +3,7 @@ import re
 import requests
 import json
 from bs4 import BeautifulSoup
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 try:
     from ddgs import DDGS
@@ -21,6 +21,7 @@ from core.config import (
     GOOGLE_MAPS_API_URL,
     SCRAPER_API_KEY,
     SCRAPER_API_URL,
+    ENRICHER_TIMEOUT,
 )
 from database.models import insert_lead, update_task_status
 from parser.extractor import (
@@ -28,6 +29,7 @@ from parser.extractor import (
     extract_emails,
     normalize_rating,
     parse_maps_listing,
+    parse_page_contacts,
 )
 from processing.cleaner import clean_lead
 from utils.helpers import (
@@ -239,7 +241,6 @@ def _fetch_via_duckduckgo(
                 if not url or not url.startswith("http"):
                     continue
 
-                # Skip known non-business domains
                 skip_domains = {
                     "google.com",
                     "youtube.com",
@@ -258,87 +259,12 @@ def _fetch_via_duckduckgo(
                     "quora.com",
                 }
                 try:
-                    from urllib.parse import urlparse as _up
-
-                    domain = _up(url).netloc.lower().replace("www.", "")
+                    domain = urlparse(url).netloc.lower().replace("www.", "")
                     if any(d in domain for d in skip_domains):
                         continue
                 except Exception:
                     continue
 
-                # Extract contact info from snippet text
-                phones = extract_phones(body)
-                emails = extract_emails(body)
-
-                listing = {
-                    "name": title,
-                    "address": "",
-                    "phone": phones[0] if phones else "",
-                    "website": url,
-                    "rating": None,
-                    "email": emails[0] if emails else "",
-                }
-                if listing["name"]:
-                    all_listings.append(listing)
-
-            task_logger.info(f"DuckDuckGo extracted {len(all_listings)} listings")
-
-    except Exception as exc:
-        task_logger.error(f"DuckDuckGo search error: {exc}")
-
-    return all_listings
-
-    try:
-        with DDGS() as ddgs:
-            results = list(
-                ddgs.text(
-                    query,
-                    max_results=min(max_results * 3, 5000),
-                    region="wt-wt",
-                    safesearch="off",
-                )
-            )
-            task_logger.info(f"DuckDuckGo returned {len(results)} results")
-
-            for r in results:
-                if len(all_listings) >= max_results:
-                    break
-
-                url = r.get("href", "")
-                title = r.get("title", "")
-                body = r.get("body", "")
-
-                if not url or not url.startswith("http"):
-                    continue
-
-                # Skip known non-business domains
-                skip_domains = {
-                    "google.com",
-                    "youtube.com",
-                    "facebook.com",
-                    "twitter.com",
-                    "x.com",
-                    "instagram.com",
-                    "linkedin.com",
-                    "wikipedia.org",
-                    "amazon.com",
-                    "yelp.com",
-                    "tripadvisor.com",
-                    "reddit.com",
-                    "pinterest.com",
-                    "medium.com",
-                    "quora.com",
-                }
-                try:
-                    from urllib.parse import urlparse as _up
-
-                    domain = _up(url).netloc.lower().replace("www.", "")
-                    if any(d in domain for d in skip_domains):
-                        continue
-                except Exception:
-                    continue
-
-                # Extract contact info from snippet text
                 phones = extract_phones(body)
                 emails = extract_emails(body)
 
@@ -735,6 +661,16 @@ def _extract_organic_fields(block) -> dict:
     return data
 
 
+CONTACT_PAGE_PATHS = [
+    "/contact",
+    "/contact-us",
+    "/contacts",
+    "/about",
+    "/about-us",
+    "/get-in-touch",
+]
+
+
 def _process_batch(
     batch: list[dict],
     task_id: str,
@@ -742,25 +678,175 @@ def _process_batch(
     task_logger: logging.Logger,
 ) -> int:
     saved = 0
-    for raw in batch:
-        raw["source"] = "maps"
-        raw["keyword"] = keyword
+    session = RequestSession()
 
-        enriched = parse_maps_listing(raw)
-        cleaned = clean_lead(enriched)
+    try:
+        for raw in batch:
+            raw["source"] = "maps"
+            raw["keyword"] = keyword
 
-        if not any([cleaned["name"], cleaned["phone"], cleaned["email"]]):
-            task_logger.debug(f"Skipping blank record: {raw.get('name', '?')}")
-            continue
+            # Visit website to extract emails AND phone numbers
+            website = raw.get("website", "").strip()
+            if website:
+                if not website.startswith(("http://", "https://")):
+                    website = "https://" + website
+                raw["website"] = website
+                if not raw.get("email") or not raw.get("phone"):
+                    _extract_contacts_from_website(raw, website, session, task_logger)
 
-        row_id = insert_lead(task_id=task_id, **cleaned)
-        if row_id:
-            saved += 1
-            task_logger.debug(
-                f"Saved #{row_id}: '{cleaned['name']}' | "
-                f"phone={cleaned['phone'] or '-'} | email={cleaned['email'] or '-'}"
-            )
-        else:
-            task_logger.debug(f"Duplicate skipped: '{cleaned['name']}'")
+            enriched = parse_maps_listing(raw)
+            cleaned = clean_lead(enriched)
+
+            if not any([cleaned["name"], cleaned["phone"], cleaned["email"]]):
+                task_logger.debug(f"Skipping blank record: {raw.get('name', '?')}")
+                continue
+
+            row_id = insert_lead(task_id=task_id, **cleaned)
+            if row_id:
+                saved += 1
+                task_logger.debug(
+                    f"Saved #{row_id}: '{cleaned['name']}' | "
+                    f"phone={cleaned['phone'] or '-'} | email={cleaned['email'] or '-'}"
+                )
+            else:
+                task_logger.debug(f"Duplicate skipped: '{cleaned['name']}'")
+
+    finally:
+        session.close()
 
     return saved
+
+
+def _extract_contacts_from_website(
+    raw: dict,
+    website: str,
+    session: RequestSession,
+    task_logger: logging.Logger,
+) -> None:
+    """Visit a business website and extract emails AND phone numbers from it."""
+    contacts = {
+        "emails": [],
+        "phones": [],
+        "name": "",
+        "address": "",
+        "social_links": [],
+    }
+
+    # Try main page first — most sites put contact info in footer/header
+    task_logger.info(f"Fetching homepage: {website}")
+    html = _fetch_safe(website, session, task_logger)
+    if html:
+        html_len = len(html)
+        task_logger.info(f"Homepage fetched: {html_len} bytes")
+        _merge_contacts(contacts, parse_page_contacts(html, source_url=website))
+        task_logger.info(
+            f"After homepage: {len(contacts['emails'])} email(s), {len(contacts['phones'])} phone(s)"
+        )
+    else:
+        task_logger.warning(f"Failed to fetch homepage: {website}")
+
+    # If missing email OR phone, try only the most likely contact pages
+    if not contacts["emails"] or not contacts["phones"]:
+        domain = _extract_domain(website)
+        if domain:
+            for path in CONTACT_PAGE_PATHS:
+                # Stop as soon as we have both
+                if contacts["emails"] and contacts["phones"]:
+                    break
+
+                sub_url = f"https://{domain}{path}"
+                if sub_url == website:
+                    continue
+
+                task_logger.debug(f"Trying contact page: {sub_url}")
+                sub_html = _fetch_safe(sub_url, session, task_logger)
+                if sub_html:
+                    _merge_contacts(
+                        contacts, parse_page_contacts(sub_html, source_url=sub_url)
+                    )
+                    task_logger.info(
+                        f"After {path}: {len(contacts['emails'])} email(s), {len(contacts['phones'])} phone(s)"
+                    )
+                else:
+                    task_logger.debug(f"Failed to fetch: {sub_url}")
+
+                # Short delay between sub-page fetches
+                random_delay()
+
+    # Apply found contacts to raw data
+    if contacts["emails"]:
+        raw["email"] = contacts["emails"][0]
+        task_logger.info(f"Found email: {contacts['emails'][0]}")
+    else:
+        task_logger.warning(f"No email found for {website}")
+
+    if contacts["phones"]:
+        raw["phone"] = contacts["phones"][0]
+        task_logger.info(f"Found phone: {contacts['phones'][0]}")
+    else:
+        task_logger.warning(f"No phone found for {website}")
+
+    if contacts["name"] and not raw.get("name"):
+        raw["name"] = contacts["name"]
+
+    if contacts.get("social_links"):
+        raw["social_links"] = contacts["social_links"]
+
+
+def _fetch_safe(
+    url: str, session: RequestSession, task_logger: logging.Logger
+) -> str | None:
+    """Safely fetch a URL and return HTML content."""
+    try:
+        return session.get(url, timeout=ENRICHER_TIMEOUT)
+    except (CaptchaError, BlockedError):
+        return None
+    except requests.exceptions.Timeout:
+        task_logger.debug(f"Timeout: {url}")
+        return None
+    except requests.exceptions.TooManyRedirects:
+        task_logger.debug(f"Too many redirects: {url}")
+        return None
+    except requests.exceptions.ConnectionError:
+        task_logger.debug(f"Connection error: {url}")
+        return None
+    except requests.exceptions.HTTPError as exc:
+        code = exc.response.status_code if exc.response else "?"
+        task_logger.debug(f"HTTP {code}: {url}")
+        return None
+    except Exception as exc:
+        task_logger.debug(f"Unexpected fetch error {url}: {exc}")
+        return None
+
+
+def _extract_domain(url: str) -> str:
+    """Extract domain from URL."""
+    try:
+        return urlparse(url).netloc.lower().replace("www.", "")
+    except Exception:
+        return ""
+
+
+def _merge_contacts(target: dict, source: dict) -> None:
+    """Merge contact info from source into target."""
+    for email in source.get("emails", []):
+        if email not in target["emails"]:
+            target["emails"].append(email)
+
+    for phone in source.get("phones", []):
+        if phone not in target["phones"]:
+            target["phones"].append(phone)
+
+    if not target["name"] and source.get("name"):
+        target["name"] = source["name"]
+
+    if not target["address"] and source.get("address"):
+        target["address"] = source["address"]
+
+    for link in source.get("social_links", []):
+        if link not in target["social_links"]:
+            target["social_links"].append(link)
+
+    for link in source.get("social_links", []):
+        if link not in target["social_links"]:
+            target["social_links"].append(link)

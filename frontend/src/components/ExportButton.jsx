@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { getExportUrl } from "../services/api";
 
-export default function ExportButton({ taskId, taskStatus, total, filters = {} }) {
+export default function ExportButton({ taskId, taskStatus, total, filters = {}, onExport }) {
   const [downloading, setDownloading] = useState(false);
 
   const canExport = ["completed", "running"].includes(taskStatus) && total > 0;
@@ -17,6 +17,7 @@ export default function ExportButton({ taskId, taskStatus, total, filters = {} }
     a.rel     = "noopener noreferrer";
     a.click();
 
+    if (onExport) onExport();
     setTimeout(() => setDownloading(false), 1800);
   }
 

@@ -15,6 +15,7 @@ def insert_lead(
     rating: Optional[float] = None,
     source: str = "unknown",
     keyword: str = "",
+    social_links: str = "",
 ) -> Optional[int]:
     if email or phone:
         with get_connection() as conn:
@@ -37,10 +38,21 @@ def insert_lead(
         cursor = conn.execute(
             """
             INSERT INTO leads
-                (task_id, name, phone, email, website, address, rating, source, keyword)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (task_id, name, phone, email, website, address, rating, source, keyword, social_links)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (task_id, name, phone, email, website, address, rating, source, keyword),
+            (
+                task_id,
+                name,
+                phone,
+                email,
+                website,
+                address,
+                rating,
+                source,
+                keyword,
+                social_links,
+            ),
         )
         conn.commit()
         return cursor.lastrowid
@@ -55,7 +67,6 @@ def get_leads_by_task(
     has_email: bool = False,
     has_phone: bool = False,
 ) -> tuple[list[dict], int]:
-
     conditions, params = _build_filter_conditions(
         task_id, search, source_filter, has_email, has_phone
     )
@@ -91,7 +102,6 @@ def get_task_lead_count(task_id: str) -> int:
 
 
 def get_leads_missing_email(task_id: str, limit: int = 50) -> list[dict]:
-
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -229,7 +239,6 @@ def update_task_status(
 
 
 def update_task_enrichment_status(task_id: str, enrichment_status: str) -> None:
-
     with get_connection() as conn:
         conn.execute(
             """
@@ -264,7 +273,6 @@ def _build_filter_conditions(
     has_email: bool,
     has_phone: bool,
 ) -> tuple[list[str], list]:
-
     conditions: list[str] = ["task_id = ?"]
     params: list = [task_id]
 

@@ -3,7 +3,6 @@ from typing import Optional
 
 
 def clean_lead(raw: dict) -> dict:
-
     return {
         "name": _clean_text(raw.get("name", ""), max_len=120),
         "phone": _clean_phone(raw.get("phone", "")),
@@ -13,6 +12,7 @@ def clean_lead(raw: dict) -> dict:
         "rating": _clean_rating(raw.get("rating")),
         "source": _clean_text(raw.get("source", "unknown"), max_len=20),
         "keyword": _clean_text(raw.get("keyword", ""), max_len=100),
+        "social_links": _clean_social_links(raw.get("social_links", [])),
     }
 
 
@@ -24,7 +24,6 @@ def _clean_text(value, max_len: int = 255) -> str:
 
 
 def _clean_phone(phone: str) -> str:
-
     if not phone:
         return ""
 
@@ -41,7 +40,6 @@ def _clean_phone(phone: str) -> str:
 
 
 def _clean_email(email: str) -> str:
-
     if not email:
         return ""
 
@@ -86,7 +84,6 @@ def _clean_email(email: str) -> str:
 
 
 def _clean_url(url: str) -> str:
-
     if not url:
         return ""
 
@@ -113,7 +110,6 @@ def _clean_url(url: str) -> str:
 
 
 def _clean_rating(raw) -> Optional[float]:
-
     if raw is None:
         return None
     try:
@@ -123,3 +119,20 @@ def _clean_rating(raw) -> Optional[float]:
         return None
     except (ValueError, TypeError):
         return None
+
+
+def _clean_social_links(links) -> str:
+    if not links:
+        return ""
+    if isinstance(links, list):
+        seen = set()
+        cleaned = []
+        for link in links:
+            link = link.strip() if isinstance(link, str) else ""
+            if link and link not in seen:
+                seen.add(link)
+                cleaned.append(link)
+        return "|".join(cleaned[:5])
+    if isinstance(links, str):
+        return links.strip()[:500]
+    return ""

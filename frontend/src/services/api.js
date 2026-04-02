@@ -28,6 +28,9 @@ export const getTaskLogs = (taskId, tail = 60) =>
 export const triggerEnrichment = (taskId) =>
   api.post(`/tasks/${taskId}/enrich`);
 
+export const cancelTask = (taskId) =>
+  api.post(`/tasks/${taskId}/cancel`);
+
 
 export const getTaskResults = (taskId, page = 1, pageSize = 20, filters = {}) =>
   api.get(`/tasks/${taskId}/results`, {
