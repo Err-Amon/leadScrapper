@@ -5,7 +5,7 @@ import { getExportUrl } from "../services/api";
 export default function ExportButton({ taskId, taskStatus, total, filters = {}, onExport }) {
   const [downloading, setDownloading] = useState(false);
 
-  const canExport = ["completed", "running"].includes(taskStatus) && total > 0;
+  const canExport = ["completed", "cancelled", "running"].includes(taskStatus) && total > 0;
 
   function handleExport() {
     if (!canExport) return;
