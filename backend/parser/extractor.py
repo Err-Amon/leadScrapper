@@ -16,15 +16,6 @@ OBFUSCATED_EMAIL_RE = re.compile(
     r"\s*([a-zA-Z]{2,})"
 )
 
-# Obfuscated email patterns: info[at]domain.com, info (at) domain . com, etc.
-OBFUSCATED_EMAIL_RE = re.compile(
-    r"([a-zA-Z0-9._%+\-]+)"
-    r"\s*(?:\[at\]|\(at\)|\{at\}|\bat\b|@)"
-    r"\s*([a-zA-Z0-9.\-]+)"
-    r"\s*(?:\[dot\]|\(dot\)|\{dot\}|\bdot\b|\.)"
-    r"\s*([a-zA-Z]{2,})"
-)
-
 # Phone: international and local formats
 # Matches: +92-300-1234567, (021) 345-6789, 0300 123 4567, +1 800 555-0100
 PHONE_RE = re.compile(

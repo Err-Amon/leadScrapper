@@ -48,8 +48,8 @@ export default function SearchForm({ onSubmit, loading }) {
 
       <div className="flex gap-1 p-1 bg-surface-700 rounded-lg w-fit">
         {[
-          { id: "maps",  label: "🗺  Google Maps"  },
-          { id: "dorks", label: "🔍  Google Dorks" },
+          { id: "maps",  label: "Maps"  },
+          { id: "dorks", label: "Dorks" },
         ].map(({ id, label }) => (
           <button
             key={id}

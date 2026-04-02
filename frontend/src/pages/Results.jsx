@@ -136,7 +136,7 @@ export default function Results() {
                          transition-colors flex items-center gap-1"
             >
               {idCopied ? (
-                <span className="text-brand-500 animate-fade-in">✓ copied</span>
+                <span className="text-brand-500 animate-fade-in">copied</span>
               ) : (
                 <>
                   {taskId?.slice(0, 8)}… · {formatDate(task?.created_at)}

@@ -39,7 +39,6 @@ from utils.helpers import (
     get_random_headers,
     random_delay,
     page_turn_delay,
-    retry,
     is_captcha_response,
 )
 from utils.logger import get_logger
@@ -842,10 +841,6 @@ def _merge_contacts(target: dict, source: dict) -> None:
 
     if not target["address"] and source.get("address"):
         target["address"] = source["address"]
-
-    for link in source.get("social_links", []):
-        if link not in target["social_links"]:
-            target["social_links"].append(link)
 
     for link in source.get("social_links", []):
         if link not in target["social_links"]:

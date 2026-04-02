@@ -166,7 +166,7 @@ export default function TaskHistory() {
                         task.enrichment_status === "failed"    ? "text-red-600"    :
                         "text-gray-700"
                       }`}>
-                        {task.enrichment_status === "completed" ? "✦ enriched" :
+                        {task.enrichment_status === "completed" ? "enriched" :
                          task.enrichment_status === "running"   ? "enriching…" :
                          task.enrichment_status === "failed"    ? "enrich failed" : ""}
                       </span>

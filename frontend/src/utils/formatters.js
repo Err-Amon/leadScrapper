@@ -21,7 +21,7 @@ export function formatWebsite(url) {
 
 export function formatRating(rating) {
   if (rating === null || rating === undefined || rating === "") return "—";
-  return `${parseFloat(rating).toFixed(1)} ★`;
+  return `${parseFloat(rating).toFixed(1)}`;
 }
 
 export function formatDate(isoString) {
@@ -55,15 +55,15 @@ export function formatSocialLinks(raw) {
 
 
 export function socialIcon(url) {
-  if (!url) return "🔗";
+  if (!url) return "Link";
   const lower = url.toLowerCase();
   if (lower.includes("facebook.com"))  return "FB";
-  if (lower.includes("twitter.com") || lower.includes("x.com")) return "𝕏";
+  if (lower.includes("twitter.com") || lower.includes("x.com")) return "X";
   if (lower.includes("instagram.com")) return "IG";
   if (lower.includes("linkedin.com"))  return "IN";
   if (lower.includes("youtube.com"))   return "YT";
   if (lower.includes("tiktok.com"))    return "TK";
-  return "🔗";
+  return "Link";
 }
 
 export function formatEnrichStatus(status) {

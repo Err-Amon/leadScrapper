@@ -215,10 +215,11 @@ def _fetch_page(url: str) -> str | None:
             timeout=ENRICHER_TIMEOUT,
             allow_redirects=True,
         )
+        response.raise_for_status()
+        response.raise_for_status()
         content_type = response.headers.get("Content-Type", "")
         if "text/html" not in content_type:
             return None
-        response.raise_for_status()
         return response.text
 
     except requests.exceptions.Timeout:

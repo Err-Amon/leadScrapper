@@ -21,7 +21,7 @@ export const getTaskStatus = (taskId) =>
 export const getAllTasks = () =>
   api.get("/tasks");
 
-export const getTaskLogs = (taskId, tail = 60) =>
+export const getTaskLogs = (taskId, tail = 50) =>
   api.get(`/tasks/${taskId}/logs`, { params: { tail } });
 
 

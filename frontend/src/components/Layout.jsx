@@ -71,9 +71,6 @@ export default function Layout() {
               <p className="font-display font-semibold text-sm text-gray-100 leading-none">
                 LeadGen
               </p>
-              <p className="text-[10px] text-brand-600 mt-0.5 font-mono">
-                v1.0 · Production
-              </p>
             </div>
           </div>
         </div>

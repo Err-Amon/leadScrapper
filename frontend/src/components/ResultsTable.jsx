@@ -170,7 +170,7 @@ export default function ResultsTable({
                   <td className="px-4 py-3 font-medium text-gray-200 whitespace-nowrap">
                     <div className="flex items-center gap-1.5">
                       {lead.enriched === 1 && (
-                        <span title="Enriched" className="text-brand-500 shrink-0">✦</span>
+                        <span title="Enriched" className="text-brand-500 text-xs font-mono shrink-0">ENR</span>
                       )}
                       {truncate(lead.name, 26) || "—"}
                     </div>
