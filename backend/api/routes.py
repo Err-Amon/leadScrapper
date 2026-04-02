@@ -28,12 +28,12 @@ class StartMapsTaskRequest(BaseModel):
     location: str = Field(
         ..., min_length=1, description="Location, e.g. 'Lahore, Pakistan'"
     )
-    max_results: int = Field(default=20, ge=1, le=100)
+    max_results: int = Field(default=20, ge=1, le=5000)
 
 
 class StartDorksTaskRequest(BaseModel):
     dork_query: str = Field(..., min_length=1, description="Google dork query string")
-    max_results: int = Field(default=20, ge=1, le=100)
+    max_results: int = Field(default=20, ge=1, le=5000)
 
 
 class TaskResponse(BaseModel):
@@ -63,7 +63,6 @@ class LeadsResponse(BaseModel):
 
 @router.post("/tasks/maps", status_code=202)
 def start_maps_task(body: StartMapsTaskRequest):
-
     task_id = task_manager.submit_task(
         source="maps",
         worker_fn=run_maps_scrape,
@@ -77,7 +76,6 @@ def start_maps_task(body: StartMapsTaskRequest):
 
 @router.post("/tasks/dorks", status_code=202)
 def start_dorks_task(body: StartDorksTaskRequest):
-
     task_id = task_manager.submit_task(
         source="dorks",
         worker_fn=run_dorks_scrape,
@@ -90,7 +88,6 @@ def start_dorks_task(body: StartDorksTaskRequest):
 
 @router.post("/tasks/{task_id}/enrich", status_code=202)
 def start_enrichment(task_id: str):
-
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -128,7 +125,6 @@ def start_enrichment(task_id: str):
 
 
 def _run_enrichment_safe(task_id: str) -> None:
-
     from utils.logger import get_task_logger
     from database.models import update_task_enrichment_status
 
@@ -210,7 +206,6 @@ def export_csv(
     has_email: bool = Query(default=False),
     has_phone: bool = Query(default=False),
 ):
-
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -249,7 +244,6 @@ def export_csv(
 
 @router.post("/tasks/{task_id}/cancel", status_code=200)
 def cancel_task(task_id: str):
-
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")

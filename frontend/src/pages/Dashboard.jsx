@@ -56,12 +56,12 @@ export default function Dashboard() {
       <div className="mt-8 grid grid-cols-2 gap-3 animate-slide-up">
         {[
           {
-            
+            icon: "🗺️",
             title: "Maps Mode",
             desc: "Searches Google Maps for businesses by keyword + location. Extracts name, phone, address, website, rating.",
           },
           {
-            
+            icon: "🔍",
             title: "Dorks Mode",
             desc: "Runs advanced Google queries. Visits result pages and extracts emails, phone numbers, and contact info.",
           },

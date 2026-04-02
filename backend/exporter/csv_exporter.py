@@ -20,6 +20,8 @@ CSV_COLUMNS = [
     "rating",
     "source",
     "keyword",
+    "social_links",
+    "enriched",
     "created_at",
 ]
 
@@ -31,7 +33,6 @@ def generate_csv(
     has_email: bool = False,
     has_phone: bool = False,
 ) -> Path:
-
     task = get_task(task_id)
     if not task:
         raise RuntimeError(f"Task {task_id} not found — cannot export.")
@@ -67,7 +68,6 @@ def generate_csv(
 
 
 def _build_filename(task: dict, source_filter: str) -> str:
-
     parts = ["leads"]
 
     # Keyword from Maps task, or first two words of dork query

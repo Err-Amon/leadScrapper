@@ -125,7 +125,7 @@ export default function SearchForm({ onSubmit, loading }) {
             value={maxResults}
             onChange={(e) => setMaxResults(Number(e.target.value))}
           >
-            {[10, 20, 30, 50, 100].map((n) => (
+            {[10, 20, 50, 100, 250, 500, 1000, 2500, 5000].map((n) => (
               <option key={n} value={n}>{n} results</option>
             ))}
           </select>

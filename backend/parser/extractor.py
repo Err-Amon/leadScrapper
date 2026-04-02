@@ -1,4 +1,5 @@
 import re
+import json
 from typing import Optional
 from bs4 import BeautifulSoup
 
@@ -50,7 +51,6 @@ ASSET_EXTENSIONS = frozenset(
 
 
 def extract_emails(text: str) -> list[str]:
-
     if not text:
         return []
 
@@ -78,7 +78,6 @@ def extract_emails(text: str) -> list[str]:
 
 
 def extract_phones(text: str) -> list[str]:
-
     if not text:
         return []
 
@@ -111,7 +110,6 @@ def normalize_rating(raw) -> Optional[float]:
 
 
 def parse_maps_listing(raw: dict) -> dict:
-
     result = {
         "name": raw.get("name", ""),
         "phone": raw.get("phone", ""),
@@ -147,11 +145,13 @@ def parse_maps_listing(raw: dict) -> dict:
 
 
 def parse_page_contacts(html: str, source_url: str = "") -> dict:
-
     if not html:
         return {"emails": [], "phones": [], "name": "", "address": ""}
 
     soup = BeautifulSoup(html, "lxml")
+
+    # Extract from JSON-LD structured data FIRST (before removing scripts)
+    json_emails, json_phones, json_addr = _extract_json_ld_contacts(soup)
 
     # Remove script and style content — not useful for contact extraction
     for tag in soup(["script", "style", "noscript", "meta", "link"]):
@@ -166,6 +166,17 @@ def parse_page_contacts(html: str, source_url: str = "") -> dict:
         if href and "@" in href:
             emails.append(href)
 
+    # Also look for email patterns in hrefs like "mailto:" encoded forms
+    for a_tag in soup.select("a"):
+        href = a_tag.get("href", "")
+        if "mailto" in href.lower() or "@" in href:
+            mail_match = EMAIL_RE.search(href)
+            if mail_match:
+                email = mail_match.group(0).strip().lower().rstrip(".,;)")
+                if email not in emails:
+                    emails.append(email)
+
+    emails.extend(json_emails)
     emails.extend(extract_emails(full_text))
     emails = list(dict.fromkeys(emails))  # dedup, preserve order
 
@@ -176,6 +187,21 @@ def parse_page_contacts(html: str, source_url: str = "") -> dict:
         if 7 <= len(digits) <= 15:
             phones.append(href)
 
+    # Also check for phone patterns in hrefs like "callto:" or "wtsp:"
+    for a_tag in soup.select("a"):
+        href = a_tag.get("href", "")
+        if any(
+            p in href.lower()
+            for p in ["tel:", "callto:", "wtsp:", "whatsapp:", "phone:"]
+        ):
+            phone_match = re.search(r"[\d\+\-\(\)\s]{7,20}", href)
+            if phone_match:
+                phone = phone_match.group(0).strip()
+                digits = re.sub(r"\D", "", phone)
+                if 7 <= len(digits) <= 15 and phone not in phones:
+                    phones.append(phone)
+
+    phones.extend(json_phones)
     phones.extend(extract_phones(full_text))
     phones = list(dict.fromkeys(phones))
 
@@ -194,19 +220,22 @@ def parse_page_contacts(html: str, source_url: str = "") -> dict:
     elif title_tag:
         name = title_tag.get_text(strip=True)
 
-    address = ""
-    schema_addr = soup.select_one("[itemprop='streetAddress'], [itemprop='address']")
-    if schema_addr:
-        address = schema_addr.get_text(strip=True)
-    else:
-        addr_match = re.search(
-            r"\d{1,5}\s+[\w\s]+(?:street|st\.?|avenue|ave\.?|road|rd\.?|lane|ln\.?|"
-            r"boulevard|blvd\.?|drive|dr\.?|court|ct\.?)[\w\s,\.]{0,60}",
-            full_text,
-            re.IGNORECASE,
+    address = json_addr if json_addr else ""
+    if not address:
+        schema_addr = soup.select_one(
+            "[itemprop='streetAddress'], [itemprop='address']"
         )
-        if addr_match:
-            address = addr_match.group(0).strip()
+        if schema_addr:
+            address = schema_addr.get_text(strip=True)
+        else:
+            addr_match = re.search(
+                r"\d{1,5}\s+[\w\s]+(?:street|st\.?|avenue|ave\.?|road|rd\.?|lane|ln\.?|"
+                r"boulevard|blvd\.?|drive|dr\.?|court|ct\.?)[\w\s,\.]{0,60}",
+                full_text,
+                re.IGNORECASE,
+            )
+            if addr_match:
+                address = addr_match.group(0).strip()
 
     return {
         "emails": emails[:5],  # Cap at 5 to avoid spam lists
@@ -214,3 +243,94 @@ def parse_page_contacts(html: str, source_url: str = "") -> dict:
         "name": name[:120],
         "address": address[:150],
     }
+
+
+def _extract_json_ld_contacts(soup: BeautifulSoup) -> tuple[list, list, str]:
+    """Extract emails, phones, and addresses from JSON-LD structured data."""
+    emails: list[str] = []
+    phones: list[str] = []
+    address = ""
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string)
+            items = data if isinstance(data, list) else [data]
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+
+                # Check for email field directly
+                if item.get("email"):
+                    email = item["email"].strip().lower()
+                    if email and "@" in email and email not in emails:
+                        emails.append(email)
+
+                # Check for telephone field
+                if item.get("telephone"):
+                    phone = item["telephone"].strip()
+                    digits = re.sub(r"\D", "", phone)
+                    if 7 <= len(digits) <= 15 and phone not in phones:
+                        phones.append(phone)
+
+                # Check for faxNumber
+                if item.get("faxNumber"):
+                    phone = item["faxNumber"].strip()
+                    digits = re.sub(r"\D", "", phone)
+                    if 7 <= len(digits) <= 15 and phone not in phones:
+                        phones.append(phone)
+
+                # Extract from address object
+                addr = item.get("address", {})
+                if isinstance(addr, dict):
+                    parts = [
+                        addr.get("streetAddress", ""),
+                        addr.get("addressLocality", ""),
+                        addr.get("addressRegion", ""),
+                        addr.get("postalCode", ""),
+                        addr.get("addressCountry", ""),
+                    ]
+                    addr_str = ", ".join(p for p in parts if p).strip()
+                    if addr_str and not address:
+                        address = addr_str[:150]
+
+                # Recursively search nested objects for emails/phones
+                _recursive_extract(item, emails, phones)
+
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            continue
+
+    # Also scan raw script text for email/phone patterns that aren't valid JSON
+    for script in soup.find_all("script", type="application/ld+json"):
+        if script.string:
+            email_matches = EMAIL_RE.findall(script.string)
+            for e in email_matches:
+                e = e.strip().lower().rstrip(".,;)")
+                domain = e.split("@")[-1] if "@" in e else ""
+                if e and domain not in JUNK_EMAIL_DOMAINS and e not in emails:
+                    emails.append(e)
+
+    return emails, phones, address
+
+
+def _recursive_extract(data, emails: list, phones: list) -> None:
+    """Recursively search nested dicts/lists for email and phone patterns."""
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, str):
+                if "@" in value:
+                    match = EMAIL_RE.search(value)
+                    if match:
+                        email = match.group(0).strip().lower()
+                        domain = email.split("@")[-1]
+                        if domain not in JUNK_EMAIL_DOMAINS and email not in emails:
+                            emails.append(email)
+                digits_in_value = re.sub(r"\D", "", value)
+                if 7 <= len(digits_in_value) <= 15 and any(c.isdigit() for c in value):
+                    if value not in phones:
+                        phones.append(value)
+            elif isinstance(value, (dict, list)):
+                _recursive_extract(value, emails, phones)
+    elif isinstance(data, list):
+        for item in data:
+            _recursive_extract(item, emails, phones)

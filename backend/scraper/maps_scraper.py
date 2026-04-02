@@ -221,7 +221,79 @@ def _fetch_via_duckduckgo(
             results = list(
                 ddgs.text(
                     query,
-                    max_results=max_results * 2,
+                    max_results=min(max_results * 3, 5000),
+                    region="wt-wt",
+                    safesearch="off",
+                )
+            )
+            task_logger.info(f"DuckDuckGo returned {len(results)} results")
+
+            for r in results:
+                if len(all_listings) >= max_results:
+                    break
+
+                url = r.get("href", "")
+                title = r.get("title", "")
+                body = r.get("body", "")
+
+                if not url or not url.startswith("http"):
+                    continue
+
+                # Skip known non-business domains
+                skip_domains = {
+                    "google.com",
+                    "youtube.com",
+                    "facebook.com",
+                    "twitter.com",
+                    "x.com",
+                    "instagram.com",
+                    "linkedin.com",
+                    "wikipedia.org",
+                    "amazon.com",
+                    "yelp.com",
+                    "tripadvisor.com",
+                    "reddit.com",
+                    "pinterest.com",
+                    "medium.com",
+                    "quora.com",
+                }
+                try:
+                    from urllib.parse import urlparse as _up
+
+                    domain = _up(url).netloc.lower().replace("www.", "")
+                    if any(d in domain for d in skip_domains):
+                        continue
+                except Exception:
+                    continue
+
+                # Extract contact info from snippet text
+                phones = extract_phones(body)
+                emails = extract_emails(body)
+
+                listing = {
+                    "name": title,
+                    "address": "",
+                    "phone": phones[0] if phones else "",
+                    "website": url,
+                    "rating": None,
+                    "email": emails[0] if emails else "",
+                }
+                if listing["name"]:
+                    all_listings.append(listing)
+
+            task_logger.info(f"DuckDuckGo extracted {len(all_listings)} listings")
+
+    except Exception as exc:
+        task_logger.error(f"DuckDuckGo search error: {exc}")
+
+    return all_listings
+
+    try:
+        with DDGS() as ddgs:
+            results = list(
+                ddgs.text(
+                    query,
+                    max_results=min(max_results * 3, 5000),
                     region="wt-wt",
                     safesearch="off",
                 )

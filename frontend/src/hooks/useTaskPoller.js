@@ -1,10 +1,9 @@
 
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getTaskStatus, getTaskResults, getTaskLogs } from "../services/api";
 
 const POLL_INTERVAL_MS  = 2000;
-const SCRAPE_TERMINAL   = new Set(["completed", "failed"]);
+const SCRAPE_TERMINAL   = new Set(["completed", "failed", "cancelled"]);
 
 export function useTaskPoller(taskId) {
   const [task,       setTask]       = useState(null);
@@ -23,17 +22,19 @@ export function useTaskPoller(taskId) {
   const intervalRef  = useRef(null);
   const pageRef      = useRef(1);
   const filtersRef   = useRef(filters);
+  const taskIdRef    = useRef(taskId);
 
-  // Keep filtersRef in sync so the interval callback always reads current values
   useEffect(() => { filtersRef.current = filters; }, [filters]);
+  useEffect(() => { taskIdRef.current = taskId; }, [taskId]);
 
   const fetchAll = useCallback(async () => {
-    if (!taskId) return;
+    const currentTaskId = taskIdRef.current;
+    if (!currentTaskId) return;
     try {
       const [statusRes, resultsRes, logsRes] = await Promise.all([
-        getTaskStatus(taskId),
-        getTaskResults(taskId, pageRef.current, 20, filtersRef.current),
-        getTaskLogs(taskId, 60),
+        getTaskStatus(currentTaskId),
+        getTaskResults(currentTaskId, pageRef.current, 20, filtersRef.current),
+        getTaskLogs(currentTaskId, 60),
       ]);
 
       const taskData = statusRes.data;
@@ -47,35 +48,34 @@ export function useTaskPoller(taskId) {
       });
       setError(null);
 
-      // Stop polling only when scrape is terminal AND enrichment is not running
       const scrapeTerminal    = SCRAPE_TERMINAL.has(taskData.status);
       const enrichmentRunning = taskData.enrichment_status === "running";
 
       if (scrapeTerminal && !enrichmentRunning) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to fetch task data.");
     } finally {
       setLoading(false);
     }
-  }, [taskId]);
+  }, []);
 
-  // Start polling on mount, restart if taskId changes
   useEffect(() => {
     if (!taskId) return;
     setLoading(true);
     fetchAll();
     intervalRef.current = setInterval(fetchAll, POLL_INTERVAL_MS);
-    return () => clearInterval(intervalRef.current);
+    return () => {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    };
   }, [taskId, fetchAll]);
 
-  // When filters change: reset to page 1, re-fetch immediately, restart polling
   const applyFilters = useCallback((newFilters) => {
     pageRef.current = 1;
     setFilters(newFilters);
-    // fetchAll reads filtersRef which will be updated on next render —
-    // use setTimeout(0) to let the ref update first
     setTimeout(() => fetchAll(), 0);
   }, [fetchAll]);
 
@@ -84,9 +84,10 @@ export function useTaskPoller(taskId) {
     fetchAll();
   }, [fetchAll]);
 
-  // Restart polling (used after triggering enrichment so UI stays live)
   const resumePolling = useCallback(() => {
-    clearInterval(intervalRef.current);
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
     intervalRef.current = setInterval(fetchAll, POLL_INTERVAL_MS);
   }, [fetchAll]);
 

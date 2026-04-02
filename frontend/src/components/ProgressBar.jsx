@@ -7,6 +7,7 @@ const SCRAPE_LABEL = {
   running:   "Scraping…",
   completed: "Completed",
   failed:    "Failed",
+  cancelled: "Cancelled",
 };
 
 const SCRAPE_BAR_COLOR = {
@@ -14,6 +15,7 @@ const SCRAPE_BAR_COLOR = {
   running:   "bg-brand-500",
   completed: "bg-brand-500",
   failed:    "bg-red-500",
+  cancelled: "bg-gray-500",
 };
 
 export default function ProgressBar({ task }) {

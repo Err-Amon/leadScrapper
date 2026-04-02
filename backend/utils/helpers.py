@@ -38,7 +38,6 @@ class BlockedError(Exception):
 
 
 def is_captcha_response(html: str) -> bool:
-
     if not html:
         return False
     lower = html.lower()
@@ -50,26 +49,22 @@ def is_blocked_status(status_code: int) -> bool:
 
 
 def random_delay() -> None:
-
     base = random.uniform(REQUEST_DELAY_MIN, REQUEST_DELAY_MAX)
     jitter = random.uniform(JITTER_MIN, JITTER_MAX)
     time.sleep(base + jitter)
 
 
 def human_delay() -> None:
-
     random_delay()
 
 
 def page_turn_delay() -> None:
-
     delay = random.uniform(PAGE_TURN_DELAY_MIN, PAGE_TURN_DELAY_MAX)
     logger.debug(f"Page-turn delay: {delay:.1f}s")
     time.sleep(delay)
 
 
 def backoff_delay(attempt: int) -> None:
-
     raw = BACKOFF_BASE_DELAY * (BACKOFF_MULTIPLIER ** (attempt - 1))
     capped = min(raw, BACKOFF_MAX_DELAY)
     jitter = random.uniform(0, capped * 0.25)  # Up to 25% extra jitter
@@ -113,7 +108,6 @@ class RequestSession:
         allow_redirects: bool = True,
         check_captcha: bool = True,
     ) -> str | None:
-
         with self._lock:
             self._maybe_recycle()
             # Rotate User-Agent on every request
@@ -159,7 +153,6 @@ def retry(
     backoff: float = BACKOFF_MULTIPLIER,
     reraise_captcha: bool = True,
 ):
-
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
@@ -215,7 +208,6 @@ def retry(
 
 
 def normalize_url(url: str) -> str:
-
     if not url:
         return ""
     url = url.strip()
@@ -226,8 +218,9 @@ def normalize_url(url: str) -> str:
 
 
 def safe_get(d: dict, *keys, default=None) -> Any:
+    current: Any = d
     for key in keys:
-        if not isinstance(d, dict):
+        if not isinstance(current, dict):
             return default
-        d = d.get(key, default)
-    return d
+        current = current.get(key, default)
+    return current

@@ -1,8 +1,6 @@
 import logging
-import re
 import requests
-import time
-from urllib.parse import urlparse, quote_plus
+from urllib.parse import urlparse
 
 try:
     from googlesearch import search as google_search
@@ -44,6 +42,11 @@ CONTACT_PAGE_PATHS = [
     "/about-us",
     "/reach-us",
     "/get-in-touch",
+    "/team",
+    "/our-team",
+    "/staff",
+    "/support",
+    "/help",
 ]
 
 BLOCKED_DOMAINS = frozenset(
@@ -84,7 +87,7 @@ def run_dorks_scrape(
     **kwargs,
 ) -> None:
     if not google_search and not DDGS:
-        msg = "No search engine available. Install googlesearch-python or duckduckgo-search."
+        msg = "No search engine available. Install ddgs or googlesearch-python."
         task_logger.error(msg)
         update_task_status(task_id, status="failed", error=msg)
         return
@@ -103,7 +106,6 @@ def run_dorks_scrape(
         batch: list[dict] = []
 
         for url in url_generator:
-            # Cancellation check
             if task_manager and task_manager.is_task_cancelled(task_id):
                 task_logger.info("Task cancelled — stopping dorks scrape.")
                 return
@@ -136,80 +138,6 @@ def run_dorks_scrape(
             if collected >= max_results:
                 break
 
-        # Flush final partial batch
-        if batch and collected < max_results:
-            saved = _process_batch(batch, task_id, dork_query, task_logger)
-            collected += saved
-            batch.clear()
-
-    except CaptchaError:
-        msg = (
-            "Google returned a CAPTCHA page — the scraper has been blocked. "
-            "Wait a few minutes and try again."
-        )
-        task_logger.error(msg)
-        update_task_status(task_id, status="failed", error=msg)
-        return
-
-    except Exception as exc:
-        task_logger.error(f"Dorks scraper unhandled error: {exc}")
-        raise
-
-    finally:
-        session.close()
-
-    task_logger.info(f"Dorks scrape complete | leads saved: {collected}")
-    update_task_status(
-        task_id,
-        status="completed",
-        progress=collected,
-        total=collected,
-    )
-    update_task_status(task_id, status="running", progress=0, total=max_results)
-
-    session = RequestSession()
-    collected = 0
-    visited_domains: set[str] = set()
-
-    try:
-        url_generator = _search_urls(dork_query, max_results, task_logger)
-        batch: list[dict] = []
-
-        for url in url_generator:
-            # Cancellation check
-            if task_manager and task_manager.is_task_cancelled(task_id):
-                task_logger.info("Task cancelled — stopping dorks scrape.")
-                return
-
-            domain = _extract_domain(url)
-            if not domain or domain in BLOCKED_DOMAINS or domain in visited_domains:
-                task_logger.debug(f"Skipping: {url}")
-                continue
-
-            visited_domains.add(domain)
-            task_logger.info(f"Visiting: {url}")
-
-            raw = _scrape_url_for_contacts(url, domain, session, task_logger)
-            if raw:
-                batch.append(raw)
-
-            if len(batch) >= BATCH_SIZE:
-                saved = _process_batch(batch, task_id, dork_query, task_logger)
-                collected += saved
-                update_task_status(
-                    task_id,
-                    status="running",
-                    progress=collected,
-                    total=max_results,
-                )
-                task_logger.info(f"Batch processed | saved={saved} | total={collected}")
-                batch.clear()
-                random_delay()
-
-            if collected >= max_results:
-                break
-
-        # Flush final partial batch
         if batch and collected < max_results:
             saved = _process_batch(batch, task_id, dork_query, task_logger)
             collected += saved
@@ -245,9 +173,8 @@ def _search_urls(
     max_results: int,
     task_logger: logging.Logger,
 ):
-    fetch_count = min(max_results * 3, 60)
+    fetch_count = min(max_results * 3, 5000)
 
-    # Try DuckDuckGo first (more reliable without API keys)
     if DDGS:
         task_logger.info(f"Running DuckDuckGo search: '{query}'")
         try:
@@ -272,7 +199,6 @@ def _search_urls(
         except Exception as exc:
             task_logger.warning(f"DuckDuckGo search error, trying Google: {exc}")
 
-    # Google fallback (may be slow or rate-limited)
     if google_search:
         task_logger.info(f"Running Google dork search: '{query}'")
         try:
@@ -311,7 +237,6 @@ def _scrape_url_for_contacts(
     }
     consecutive_failures = 0
 
-    # Root page first
     html = _fetch_safe(url, session, task_logger)
     if html:
         _merge_contacts(contacts, parse_page_contacts(html, source_url=url))
@@ -319,8 +244,7 @@ def _scrape_url_for_contacts(
     else:
         consecutive_failures += 1
 
-    # Sub-pages only if still no email and not too many failures
-    if not contacts["emails"]:
+    if not contacts["emails"] or not contacts["phones"]:
         for path in CONTACT_PAGE_PATHS:
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 task_logger.debug(
@@ -341,7 +265,7 @@ def _scrape_url_for_contacts(
             else:
                 consecutive_failures += 1
 
-            if contacts["emails"]:
+            if contacts["emails"] and contacts["phones"]:
                 break
 
             page_turn_delay()
@@ -369,7 +293,7 @@ def _fetch_safe(
         return session.get(url, timeout=ENRICHER_TIMEOUT)
 
     except CaptchaError:
-        raise  # Propagate — this is a critical signal
+        raise
 
     except BlockedError as exc:
         task_logger.debug(f"Blocked fetching {url}: {exc}")
