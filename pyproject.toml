@@ -8,10 +8,12 @@ dependencies = [
     "aiofiles==23.2.1",
     "beautifulsoup4==4.12.3",
     "fastapi==0.111.0",
+    "googlemaps>=4.10.0",
     "googlesearch-python==1.2.3",
     "lxml==5.2.2",
     "pydantic==2.7.1",
     "python-multipart==0.0.9",
     "requests==2.31.0",
+    "scraperapi-sdk>=1.2.0",
     "uvicorn[standard]==0.29.0",
 ]

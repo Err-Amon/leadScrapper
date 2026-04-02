@@ -148,7 +148,6 @@ def list_tasks():
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
 def get_task_status(task_id: str):
-    """Return status, progress, and enrichment_status for a single task."""
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -160,7 +159,6 @@ def get_task_logs(
     task_id: str,
     tail: int = Query(default=50, ge=1, le=200),
 ):
-    """Return the last N log lines from the task's log file."""
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -249,6 +247,30 @@ def export_csv(
     )
 
 
+@router.post("/tasks/{task_id}/cancel", status_code=200)
+def cancel_task(task_id: str):
+
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found.")
+
+    if task["status"] in ("completed", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task is already in a terminal state: {task['status']}.",
+        )
+
+    success = task_manager.cancel_task(task_id)
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Task could not be cancelled.",
+        )
+
+    logger.info(f"Task {task_id} cancellation requested.")
+    return {"task_id": task_id, "status": "cancelled"}
+
+
 @router.get("/health")
 def health_check():
-    return {"status": "ok", "service": "lead-gen-tool", "phase": 5}
+    return {"status": "ok", "service": "lead-gen-tool", "phase": 7}

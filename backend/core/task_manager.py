@@ -1,9 +1,9 @@
 import uuid
 import threading
-from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Any
+from concurrent.futures import ThreadPoolExecutor, wait as futures_wait, FIRST_COMPLETED
+from typing import Callable
 
-from core.config import MAX_WORKERS
+from core.config import MAX_WORKERS, TASK_SHUTDOWN_TIMEOUT
 from database.models import create_task, update_task_status, get_task
 from utils.logger import get_logger, get_task_logger
 
@@ -17,6 +17,7 @@ class TaskManager:
             thread_name_prefix="scraper-worker",
         )
         self._lock = threading.Lock()
+        self._cancelled: set[str] = set()  # task_ids that have been cancelled
         logger.info(f"TaskManager initialized with {MAX_WORKERS} workers.")
 
     def submit_task(
@@ -56,42 +57,35 @@ class TaskManager:
             max_results=max_results,
         )
 
-        logger.info(f"Task {task_id} submitted to worker pool.")
+        logger.info(f"Task {task_id} submitted.")
         return task_id
 
-    def _run_task(
-        self,
-        task_id: str,
-        worker_fn: Callable,
-        **kwargs,
-    ) -> None:
+    def cancel_task(self, task_id: str) -> bool:
 
-        task_logger = get_task_logger(task_id)
-        update_task_status(task_id, status="running", progress=0)
-        task_logger.info("Task started.")
+        task = get_task(task_id)
+        if not task:
+            return False
+        if task["status"] in ("completed", "failed", "cancelled"):
+            return False
 
-        try:
-            worker_fn(task_id=task_id, task_logger=task_logger, **kwargs)
-            task = get_task(task_id)
-            update_task_status(
-                task_id,
-                status="completed",
-                progress=task.get("total", 0),
-                total=task.get("total", 0),
-            )
-            task_logger.info("Task completed successfully.")
+        with self._lock:
+            self._cancelled.add(task_id)
 
-        except Exception as exc:
-            logger.exception(f"Task {task_id} raised an unhandled exception: {exc}")
-            update_task_status(
-                task_id,
-                status="failed",
-                error=str(exc),
-            )
-            task_logger.error(f"Task failed: {exc}")
+        update_task_status(
+            task_id,
+            status="cancelled",
+            progress=task.get("progress", 0),
+            total=task.get("total", 0),
+        )
+        logger.info(f"Task {task_id} marked for cancellation.")
+        return True
+
+    def is_task_cancelled(self, task_id: str) -> bool:
+
+        with self._lock:
+            return task_id in self._cancelled
 
     def get_task_logs(self, task_id: str, tail: int = 50) -> list[str]:
-
         from core.config import LOGS_DIR
 
         log_file = LOGS_DIR / f"{task_id}.log"
@@ -102,6 +96,54 @@ class TaskManager:
         return [line.rstrip() for line in lines[-tail:]]
 
     def shutdown(self) -> None:
-        logger.info("Shutting down TaskManager...")
-        self._executor.shutdown(wait=True)
+
+        logger.info(
+            f"TaskManager shutting down — waiting up to {TASK_SHUTDOWN_TIMEOUT}s "
+            "for running tasks…"
+        )
+        self._executor.shutdown(wait=True, cancel_futures=False)
         logger.info("TaskManager shutdown complete.")
+
+    def _run_task(
+        self,
+        task_id: str,
+        worker_fn: Callable,
+        **kwargs,
+    ) -> None:
+
+        task_logger = get_task_logger(task_id)
+
+        if self.is_task_cancelled(task_id):
+            task_logger.info("Task was cancelled before it started.")
+            return
+
+        update_task_status(task_id, status="running", progress=0)
+        task_logger.info("Task worker started.")
+
+        try:
+            worker_fn(
+                task_id=task_id,
+                task_logger=task_logger,
+                task_manager=self,
+                **kwargs,
+            )
+
+            task = get_task(task_id)
+            if task and task["status"] not in ("cancelled", "failed"):
+                update_task_status(
+                    task_id,
+                    status="completed",
+                    progress=task.get("total", 0),
+                    total=task.get("total", 0),
+                )
+                task_logger.info("Task completed successfully.")
+
+        except Exception as exc:
+            logger.exception(f"Task {task_id} worker raised: {exc}")
+            update_task_status(task_id, status="failed", error=str(exc))
+            task_logger.error(f"Task failed: {exc}")
+
+        finally:
+            # Always clean up the cancelled set
+            with self._lock:
+                self._cancelled.discard(task_id)

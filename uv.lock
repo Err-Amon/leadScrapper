@@ -216,6 +216,15 @@ wheels = [
 ]
 
 [[package]]
+name = "googlemaps"
+version = "4.10.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fe/26/bca4d737a9acea25e94c19940a780bbf0be64a691f7caf3a68467d3a5838/googlemaps-4.10.0.tar.gz", hash = "sha256:3055fcbb1aa262a9159b589b5e6af762b10e80634ae11c59495bd44867e47d88", size = 33056, upload-time = "2023-01-26T16:45:02.501Z" }
+
+[[package]]
 name = "googlesearch-python"
 version = "1.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -320,11 +329,13 @@ dependencies = [
     { name = "aiofiles" },
     { name = "beautifulsoup4" },
     { name = "fastapi" },
+    { name = "googlemaps" },
     { name = "googlesearch-python" },
     { name = "lxml" },
     { name = "pydantic" },
     { name = "python-multipart" },
     { name = "requests" },
+    { name = "scraperapi-sdk" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -333,11 +344,13 @@ requires-dist = [
     { name = "aiofiles", specifier = "==23.2.1" },
     { name = "beautifulsoup4", specifier = "==4.12.3" },
     { name = "fastapi", specifier = "==0.111.0" },
+    { name = "googlemaps", specifier = ">=4.10.0" },
     { name = "googlesearch-python", specifier = "==1.2.3" },
     { name = "lxml", specifier = "==5.2.2" },
     { name = "pydantic", specifier = "==2.7.1" },
     { name = "python-multipart", specifier = "==0.0.9" },
     { name = "requests", specifier = "==2.31.0" },
+    { name = "scraperapi-sdk", specifier = ">=1.2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.29.0" },
 ]
 
@@ -658,6 +671,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/42/ba/dae9e3096651042754da419a4042bc1c75e07d615f9b15066d738838e4df/rich_toolkit-0.19.7.tar.gz", hash = "sha256:133c0915872da91d4c25d85342d5ec1dfacc69b63448af1a08a0d4b4f23ef46e", size = 195877, upload-time = "2026-02-24T16:06:20.555Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fb/3c/c923619f6d2f5fafcc96fec0aaf9550a46cd5b6481f06e0c6b66a2a4fed0/rich_toolkit-0.19.7-py3-none-any.whl", hash = "sha256:0288e9203728c47c5a4eb60fd2f0692d9df7455a65901ab6f898437a2ba5989d", size = 32963, upload-time = "2026-02-24T16:06:22.066Z" },
+]
+
+[[package]]
+name = "scraperapi-sdk"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2e/3d/1d96df2b260a29f51cba385818086b1d8d09d68c27a8053354ed1d80bf85/scraperapi_sdk-1.6.0.tar.gz", hash = "sha256:ffc55b78f64056968060ebcbc87420aac895720127dac943bd4c05eb3be8dd45", size = 9625, upload-time = "2025-10-28T09:35:37.395Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/79/e7/0be7363384f6fa443c4cf8338876f019883b86c086ba20b72bcf30d22a41/scraperapi_sdk-1.6.0-py3-none-any.whl", hash = "sha256:03346570ad70844247ec903f0224d6b28e907088839ce4aca8a5ac60e7551bfd", size = 8092, upload-time = "2025-10-28T09:35:36.577Z" },
 ]
 
 [[package]]

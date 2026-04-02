@@ -7,3 +7,5 @@ lxml==5.2.2
 googlesearch-python==1.2.3
 aiofiles==23.2.1
 python-multipart==0.0.9
+googlemaps>=4.10.0
+scraperapi-sdk>=1.2.0

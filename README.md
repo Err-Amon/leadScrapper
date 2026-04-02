@@ -7,10 +7,63 @@ Web-based lead generation tool built with Python (FastAPI) + React + SQLite.
 - **Frontend**: React 18, Tailwind CSS, React Router v6
 - **Scrapers**: requests + BeautifulSoup (Maps), googlesearch-python (Dorks)
 
-
 ## Setup & Run
 
-### Backend
+### 1. Environment Configuration
+
+Copy the example environment file and configure your API keys:
+
+```bash
+cp .env.example .env
+```
+
+### 2. API Keys Setup
+
+#### Option A: Google Maps API (Recommended - Most Reliable)
+
+This is the most reliable method as it uses Google's official API instead of scraping.
+
+**How to get your Google Maps API key:**
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Enable the **Places API (New)**:
+   - Navigate to **APIs & Services** > **Library**
+   - Search for "Places API (New)" and enable it
+4. Create credentials:
+   - Go to **APIs & Services** > **Credentials**
+   - Click **Create Credentials** > **API Key**
+   - Copy your API key
+5. (Optional) Restrict the API key to only the Places API for security
+6. Add the key to your `.env` file:
+   ```
+   GOOGLE_MAPS_API_KEY=your-api-key-here
+   ```
+
+**Pricing:** Google offers $200 free credit monthly (~28,000 Text Search requests). After that, pay-as-you-go pricing applies.
+
+#### Option B: ScraperAPI (Handles Anti-Scraping)
+
+Use this if you want to scrape Google directly without managing proxies or CAPTCHAs.
+
+**How to get your ScraperAPI key:**
+
+1. Go to [ScraperAPI.com](https://www.scraperapi.com/)
+2. Sign up for a free account
+3. Navigate to your **Dashboard**
+4. Copy your API key
+5. Add the key to your `.env` file:
+   ```
+   SCRAPER_API_KEY=your-api-key-here
+   ```
+
+**Pricing:** Free tier includes 5,000 requests/month. Paid plans start at $49/month.
+
+#### Option C: Direct Scraping (No API Key Required)
+
+If no API keys are configured, the scraper will fall back to direct Google scraping. This method is less reliable and may trigger CAPTCHAs.
+
+### 3. Backend
 
 ```bash
 cd backend
